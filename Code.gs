@@ -46,8 +46,16 @@ function processData(data) {
     let cityAddress = "";
 
     // 郵便番号を抽出（例：123-4567）
-    const postalMatch = postalAddress.match(/\d{3}-\d{4}/);
-    postalCode = postalMatch ? postalMatch[0] : "478-0000";
+    const postalMatch = postalAddress.match(/\d{3}-\d{4}|\d{7}/);
+    if (postalMatch) {
+      postalCode = postalMatch[0];
+      if (/^\d{7}$/.test(postalCode)) {
+        // ハイフンがない場合は挿入（例：1234567 → 123-4567）
+        postalCode = postalCode.slice(0, 3) + "-" + postalCode.slice(3);
+      }
+    } else {
+      postalCode = "478-0000";  // デフォルト値
+    }
 
     // 47都道府県一覧
     const prefectures = [
