@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+    <h3>CSV ファイルをアップロード</h3>
+
+    <input type="file" id="csvFile" accept=".csv"><br><br>
+    <label for="fileName">保存するスプレッドシート名：</label><br>
+    <input type="text" id="fileName" placeholder="例：依頼票_20250601"><br><br>
+    <button onclick="uploadFile()">アップロード</button>
+    <p id="message"></p>
+
+    <script>
+      function uploadFile() {
+        const file = document.getElementById("csvFile").files[0];
+        const fileName = document.getElementById("fileName").value.trim();
+
+        if (!file) {
+          alert("CSVファイルを選択してください");
+          return;
+        }
+        if (!fileName) {
+          alert("スプレッドシートの名前を入力してください");
+          return;
+        }
+
+        document.getElementById("message").innerHTML = "アップロード中です...";
+
+        const reader = new FileReader();
+
+        reader.onload = function(event) {
+          google.script.run
+            .withSuccessHandler(function(url) {
+              document.getElementById("message").innerHTML =
+                "保存完了：<a href='" + url + "' target='_blank'>スプレッドシートを開く</a>";
+            })
+            .withFailureHandler(function(error) {
+              document.getElementById("message").innerHTML = "";
+              alert("エラー発生: " + error.message);
+            })
+            .processCSV(event.target.result, fileName);
+        };
+
+        reader.readAsText(file, "Shift_JIS");
+      }
+    </script>
+  </body>
+</html>
