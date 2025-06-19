@@ -1,50 +1,134 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <base target="_top">
-  </head>
-  <body>
-    <h3>CSV ファイルをアップロード</h3>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <title>CSV住所登録</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    body{font-family:sans-serif;text-align:center}
+    input,button{padding:6px;margin:4px}
+    .row-group{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:6px}
+    .row-group input{width:120px}
+    #dropArea{border:2px dashed #aaa;padding:30px;margin:20px auto;width:80%;max-width:600px;color:#888}
+    #dropArea.dragover{border-color:#66f;background:#eef;color:#000}
+    #status {color: #cc6666;font-weight: bold;margin-top: 10px;}
+  </style>
+</head>
+<body>
+  <h2>CSVファイルから住所登録</h2>
+  <input type="file" id="csvFile" accept=".csv">
+  <div id="dropArea">ここにCSVをドロップ</div>
+  <label for="fileName">保存するスプレッドシート名：</label>
+  <input type="text" id="fileName" placeholder="保存するスプレッドシート名"><br>
 
-    <input type="file" id="csvFile" accept=".csv"><br><br>
-    <label for="fileName">保存するスプレッドシート名：</label><br>
-    <input type="text" id="fileName" placeholder="例：依頼票_20250601"><br><br>
-    <button onclick="uploadFile()">アップロード</button>
-    <p id="message"></p>
+  <div id="addressContainer"></div>
 
-    <script>
-      function uploadFile() {
-        const file = document.getElementById("csvFile").files[0];
-        const fileName = document.getElementById("fileName").value.trim();
+  <button onclick="loadAllMasters()">マスタ読み込み</button>
+  <button onclick="uploadFile()">アップロード</button>
+  <p id="message"></p>
+  <p id="status"></p>
 
-        if (!file) {
-          alert("CSVファイルを選択してください");
-          return;
-        }
-        if (!fileName) {
-          alert("スプレッドシートの名前を入力してください");
-          return;
-        }
+<script>
+const dropArea  = document.getElementById('dropArea');
+const fileInput = document.getElementById('csvFile');
+const container = document.getElementById('addressContainer');
 
-        document.getElementById("message").innerHTML = "アップロード中です...";
+/***** Drag & Drop *****/
+['dragover','dragleave'].forEach(ev=>dropArea.addEventListener(ev,e=>{e.preventDefault();dropArea.classList.toggle('dragover',ev==='dragover')}));
+dropArea.addEventListener('drop',e=>{e.preventDefault();dropArea.classList.remove('dragover');fileInput.files=e.dataTransfer.files;handleFile(e.dataTransfer.files[0])});
+fileInput.addEventListener('change',()=>handleFile(fileInput.files[0]));
 
-        const reader = new FileReader();
+/***** CSV Handling *****/
+function handleFile(file){
+  if(!file||!file.name.endsWith('.csv')) return alert('CSVファイルを選択してください');
+  document.getElementById('fileName').value=file.name.replace(/\.[^/.]+$/,'');
+  Papa.parse(file,{encoding:'Shift_JIS',skipEmptyLines:true,complete:res=>buildInputs(res.data)});
+}
 
-        reader.onload = function(event) {
-          google.script.run
-            .withSuccessHandler(function(url) {
-              document.getElementById("message").innerHTML =
-                "保存完了：<a href='" + url + "' target='_blank'>スプレッドシートを開く</a>";
-            })
-            .withFailureHandler(function(error) {
-              document.getElementById("message").innerHTML = "";
-              alert("エラー発生: " + error.message);
-            })
-            .processCSV(event.target.result, fileName);
-        };
+function buildInputs(data){
+  container.innerHTML='';
+  for(let i=1;i<data.length;i++){
+    const row = data[i];
+    const base = row[7] ||''; // ← 修正：住所の候補列
+    const {zip,pref,city}=extractAddress(base);
+    const div=document.createElement('div');div.className='row-group';
+    div.innerHTML=`<span>行${i}</span>
+      <input class='zipInput'  value='${zip}'  placeholder='郵便番号' style='width:60px'>
+      <input class='prefInput' value='${pref}' placeholder='都道府県' style='width:60px'>
+      <input class='addrInput' value='${city}' placeholder='市区町村以下' style='width:250px'>`;
+    container.appendChild(div);
+  }
+}
 
-        reader.readAsText(file, "Shift_JIS");
+
+/***** Address extraction *****/
+function extractAddress(str){
+  let zip='',pref='',city='不明';
+  const m=str.match(/\d{3}-\d{4}|\d{7}/);
+  if(m) zip=m[0].length===7?m[0].slice(0,3)+'-'+m[0].slice(3):m[0];
+  const prefs=["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+  for(const p of prefs){if(str.includes(p)){pref=p;city=str.split(p)[1]?.trim()||'';break;}}
+  return {zip,pref,city};
+}
+
+/***** Master lookup for all rows *****/
+function loadAllMasters(){
+  const zips  = document.querySelectorAll('.zipInput');
+  const prefs = document.querySelectorAll('.prefInput');
+  const addrs = document.querySelectorAll('.addrInput');
+
+  const zipList  = [...zips].map(el => el.value.trim());
+  const prefList = [...prefs].map(el => el.value.trim());
+  const addrList = [...addrs].map(el => el.value.trim());
+
+  const status = document.getElementById('status');
+  status.textContent = 'マスタ読み込み中...';
+
+  let completed = 0;
+  const total = zips.length;
+
+  zips.forEach((zipInput, i) => {
+    const zip = zipInput.value.trim();
+    if (!zip) {
+      completed++;
+      if (completed === total) status.textContent = 'マスタ読み込み完了';
+      return;
+    }
+
+    google.script.run.withSuccessHandler(res => {
+      if (res) {
+        prefs[i].value = res.pref;
+        addrs[i].value = res.addr;
       }
-    </script>
-  </body>
+      completed++;
+      if (completed === total) status.textContent = 'マスタ読み込み完了';
+    }).withFailureHandler(err => {
+      completed++;
+      if (completed === total) status.textContent = 'マスタ読み込み完了（エラーあり）';
+    }).lookupAddress(zip);
+  });
+}
+
+/***** Upload *****/
+function uploadFile(){
+  const file=fileInput.files[0];
+  const name=document.getElementById('fileName').value.trim();
+  if(!file||!name) return alert('CSVと名前を確認');
+  const zipList  = [...document.querySelectorAll('.zipInput') ].map(el => el.value.trim());
+  const prefList = [...document.querySelectorAll('.prefInput')].map(el => el.value.trim());
+  const addrList = [...document.querySelectorAll('.addrInput')].map(el => el.value.trim());
+  document.getElementById('message').textContent='アップロード中…';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    google.script.run.withSuccessHandler(url=>{
+      document.getElementById('message').innerHTML=`<a href='${url}' target='_blank'>スプレッドシートを開く</a>`;
+    }).withFailureHandler(err=>{
+      document.getElementById('message').textContent='エラー: '+(err.message||err);
+    }).processCSV(e.target.result, name, zipList, prefList, addrList);
+  };
+  reader.readAsText(file,'Shift_JIS');
+}
+</script>
+</body>
 </html>

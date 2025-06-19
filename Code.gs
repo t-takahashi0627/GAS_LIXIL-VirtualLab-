@@ -1,13 +1,20 @@
-// Webアプリとしてのエントリポイント
+// 郵便番号マスタ設定（IMPORTRANGEで使う）
+const ZIP_MASTER_ID = '1FdicA2XbJCvcDUi5L2iNwTYsUwJy7VZClWibXwtdudk';
+const ZIP_MASTER_SHEET = 'utf_ken_all_SJIS'; // シート名
+
+/**
+ * Webアプリとしてのエントリポイント
+ */
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Upload");
 }
 
-// CSVを処理してDriveにスプレッドシートを保存する
-// CSVを処理してDriveにスプレッドシートを保存する
-function processCSV(csvText, fileName) {
-  const rows = Utilities.parseCsv(csvText);
-  const processedData = processData(rows);
+/**
+ * CSVを受け取り、スプレッドシートに整形保存
+ */
+function processCSV(csvText, fileName, zipList, prefList, addrList) {
+ const rows = Utilities.parseCsv(csvText);
+  const processedData = processData(rows, zipList, prefList, addrList);
 
   // ファイル名が未指定ならデフォルト名を使用
   const sheetName = fileName || "CSV_" + new Date().toISOString().slice(0, 10);
@@ -18,9 +25,31 @@ function processCSV(csvText, fileName) {
 
   return spreadsheet.getUrl(); // URLを返す
 }
+ 
+/**
+ * 郵便番号から住所を検索（マスタ参照）
+ */
+function lookupAddress(zipCode) {
+  const sheet = SpreadsheetApp.openById(ZIP_MASTER_ID).getSheetByName(ZIP_MASTER_SHEET);
+  const data = sheet.getRange('A:D').getValues();
+  const key = zipCode.replace(/-/g, '');
 
-// CSVデータを整形処理
-function processData(data) {
+  for (let i = 0; i < data.length; i++) {
+    const rowZip = (data[i][0] + '').replace(/-/g, '');
+    if (rowZip === key) {
+      return {
+        pref: data[i][1],
+        addr: (data[i][2] || '') + (data[i][3] || '')
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * CSVデータの整形処理
+ */
+function processData(data, zipList, prefList, addrList) {
   const headers = [
     "お客さま氏名", "お客さま氏名（フリガナ）", "お客さまTEL", "お客さま郵便番号", "お客さま都道府県",
     "お客さま市区町村町域", "ご依頼内容", "製品のブランド", "製品品番", "取付年月（年）", "取付年月（月）",
@@ -31,97 +60,103 @@ function processData(data) {
 
   const result = [headers];
 
+  // 入力値の整形
+  //const zip = uiZip?.match(/^\d{7}$/) ? uiZip.replace(/^(\d{3})(\d{4})$/, '$1-$2') : (uiZip || '478-0000');
+  //const pref = uiPref || "愛知県";
+  //const addr = uiAddr || "不明";
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const newRow = [];
 
-    newRow[0]  = row[5]  || "";
-    newRow[1]  = row[0]  || "";
-    newRow[2]  = row[6]  || "";
+    // 郵便番号・都道府県・市区町村（それぞれの行に対応する値を使用）
+    const zip = zipList?.[i - 1] || "478-0000";
+    const pref = prefList?.[i - 1] || "愛知県";
+    const addr = addrList?.[i - 1] || "不明";
 
-    // row[7] には「郵便番号＋住所」全体が入っている前提
-    let postalAddress = row[7] || "";
-    let postalCode = "";
-    let prefecture = "";
-    let cityAddress = "";
 
-    // 郵便番号を抽出（例：123-4567）
-    const postalMatch = postalAddress.match(/\d{3}-\d{4}|\d{7}/);
-    if (postalMatch) {
-      postalCode = postalMatch[0];
-      if (/^\d{7}$/.test(postalCode)) {
-        // ハイフンがない場合は挿入（例：1234567 → 123-4567）
-        postalCode = postalCode.slice(0, 3) + "-" + postalCode.slice(3);
-      }
-    } else {
-      postalCode = "478-0000";  // デフォルト値
-    }
+    const val5 = (row[5] || "").trim();
+    newRow[0] = val5 !== "" ? val5 : "不明";
 
-    // 47都道府県一覧
-    const prefectures = [
-      "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
-      "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
-      "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県",
-      "岐阜県", "静岡県", "愛知県", "三重県",
-      "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県",
-      "鳥取県", "島根県", "岡山県", "広島県", "山口県",
-      "徳島県", "香川県", "愛媛県", "高知県",
-      "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"
-    ];
+    const val0 = (row[0] || "").trim();
+    newRow[1] = val0 !== "" ? val0 : "フメイ";
 
-    // 都道府県を検索
-    let matchedPref = "";
-    for (const pref of prefectures) {
-      if (postalAddress.includes(pref)) {
-        matchedPref = pref;
-        break;
-      }
-    }
-    prefecture = matchedPref || "愛知県";
+    const tel = (row[6] || "").replace(/-/g, "").trim();
+    newRow[2] = tel !== "" ? tel : "999999999";
 
-    // 市区町村以下の住所
-    if (matchedPref) {
-      const index = postalAddress.indexOf(matchedPref);
-      cityAddress = postalAddress.slice(index + matchedPref.length).trim();
-      if (!cityAddress) cityAddress = "不明";
-    } else {
-      cityAddress = "不明";
-    }
+    newRow[3] = zip;      // 郵便番号（HTML入力値）
+    newRow[4] = pref;   // 都道府県（HTML入力値）
+    newRow[5] = addr;   // 市区町村以下（HTML入力値）
 
-    newRow[3] = postalCode;
-    newRow[4] = prefecture;
-    newRow[5] = cityAddress;
+    const val18 = (row[18] || "").trim();
+    newRow[6] = val18 !== "" ? val18 : "修理依頼";
 
-    newRow[6]  = row[18] || "";
-
-    // 対応するブランド名（インデックス 10, 11, 12）
     const brandFlags = [row[10], row[11], row[12]];
     const brandLabels = ["LIXIL", "TOSTEM", "INAX"];
+    const selectedIndexes = brandFlags.map((flag, i) => flag === "1" ? i : -1).filter(i => i !== -1);
+    newRow[7] = selectedIndexes.length === 1 ? brandLabels[selectedIndexes[0]] : "INAX";
 
-    // "1" が付いているブランド名だけを抽出
-    const selectedBrands = brandFlags.map((flag, i) => flag === "1" ? brandLabels[i] : null).filter(Boolean);
+    const val13 = (row[13] || "").trim();
+    newRow[8] = val13 !== "" ? val13 : "ﾌﾒｲ";
 
-    // 結果をセット（なければ "INAX"）
-    newRow[7] = selectedBrands.length > 0 ? selectedBrands.join(" ") : "INAX";
+    const dateValue = (row[14] || "").trim();
+    const dateMatch = dateValue.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    newRow[9] = dateMatch ? dateMatch[1] : "";
+    newRow[10] = dateMatch ? dateMatch[2].padStart(2, '0') : "";
 
-    newRow[8]  = row[13] || "";
-    newRow[9]  = row[14] || "";
-    newRow[10] = "";
-    newRow[11] = row[19] || "";
-    newRow[12] = "";
-    newRow[13] = "";
-    newRow[14] = row[23] || "";
-    newRow[15] = row[21] || "";
-    newRow[16] = row[22] || "";
-    newRow[17] = "";
-    newRow[18] = "";
-    newRow[19] = "";
-    newRow[20] = "";
-    newRow[21] = "";
+    const val19 = (row[19] || "").trim();
+    if (val19 !== "") {
+      newRow[11] = 0;
+      newRow[12] = 1;
+      newRow[13] = val19;
+    } else {
+      newRow[11] = 1;
+      newRow[12] = 0;
+      newRow[13] = "";
+    }
+
+    //------------newRow14の処理---------------------
+    const val23 = (row[23] || "").trim();
+    newRow[14] = val23 !== "" ? val23 : "99999";
+
+    //------------newRow15の処理---------------------
+    const val21 = (row[21] || "").trim();
+    newRow[15] = val21 !== "" ? val21 : "不明";
+
+    //------------newRow16の処理---------------------
+    const val22 = (row[22] || "").trim();
+    newRow[16] = val22 !== "" ? val22 : "不明";
+
+    //------------newRow17の処理---------------------
+    newRow[17] = "不明";
+
+    //------------newRow18の処理---------------------
+    newRow[18] = "999999999";
+
+    //------------newRow19の処理---------------------
+    newRow[19] = "999999999";
+
+    //------------newRow20の処理---------------------
+    newRow[20] = "9999";
+
+    //------------newRow21の処理---------------------
+    newRow[21] = "9999";
+
+    //------------newRow22の処理---------------------
     newRow[22] = "";
-    newRow[23] = row[31] || "";
-    newRow[24] = row[32] || "";
-    newRow[25] = row[29] || "";
+
+
+    //------------newRow23の処理---------------------
+    const val31 = (row[31] || "").trim();
+    newRow[23] = val31 !== "" ? val31 : "ﾌﾒｲ";
+
+    //------------newRow24の処理---------------------
+    const val32 = (row[32] || "").trim();
+    newRow[24] = val32 !== "" ? val32 : "不明";
+
+    //------------newRow25の処理---------------------
+    const val29 = (row[29] || "").trim();
+    newRow[25] = val29 !== "" ? val29 : "999999999";
 
     result.push(newRow);
   }
